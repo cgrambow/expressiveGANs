@@ -11,11 +11,12 @@ from util import imread, imsave
 def main():
     args = parse_args()
     imdir = args.imdir
+    nsamples = args.nsamples
     s = args.sample
     nsim = args.nsim
     out_dir = args.out_dir
 
-    impaths = glob.iglob(os.path.join(imdir, '*'))
+    impaths = glob.glob(os.path.join(imdir, '*'))[:nsamples]
     imlist = [imread(path)/127.5 - 1.0 for path in impaths]  # Scale between -1 and 1
     assert len(imlist) >= s
     random.shuffle(imlist)  # Do this just in case
@@ -55,6 +56,8 @@ def parse_args():
     parser.add_argument('-s', '--sample', type=int, metavar='S', help='Sample size')
     parser.add_argument('-n', '--nsim', type=int, default=20, metavar='N',
                         help='Number of most similar pairs to display per sample batch')
+    parser.add_argument('--nsamples', type=int, default=50000, metavar='N',
+                        help='Only use up to nsamples samples in imdir')
     parser.add_argument('-o', '--out_dir', default=os.getcwd(), metavar='D',
                         help='Output directory')
     return parser.parse_args()
