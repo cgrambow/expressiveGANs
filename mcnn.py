@@ -274,12 +274,16 @@ class MCNN(object):
                 accuracy = self.evaluate(self.xt, self.yt, batch_size=batch_size, aux=aux)
                 print('Test accuracy: {:.2f}'.format(accuracy*100.0))
 
-    def evaluate(self, xt, yt, batch_size=None, aux=False):
+    def predict(self, xt, batch_size=None, aux=False):
         ytp = self.model.predict(xt, batch_size=batch_size)
         if aux:
             ytp = self.aux_model.predict(ytp, batch_size=batch_size)
         ytp[ytp>=0.5] = 1
         ytp[ytp<0.5] = 0
+        return ytp
+
+    def evaluate(self, xt, yt, batch_size=None, aux=False):
+        ytp = self.predict(xt, batch_size=batch_size, aux=aux)
         return 1.0 - np.sum(np.abs(yt - ytp)) / yt.size
 
     def save(self, aux=False):
