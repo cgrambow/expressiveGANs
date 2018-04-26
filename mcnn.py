@@ -3,6 +3,7 @@ import os
 import random
 import time
 
+import keras
 from keras.models import Model
 from keras.layers import Input, Conv2D, MaxPooling2D, BatchNormalization, Dense, Flatten, Activation, Dropout
 import numpy as np
@@ -13,7 +14,7 @@ from util import get_image
 class MCNN(object):
     def __init__(self, input_height=108, input_width=108, crop=True, output_height=64, output_width=64,
                  train_dataset_name='celebA', test_dataset_name=None, data_dir='', input_fname_pattern='*.jpg',
-                 attribute_file_name='list_attr_celeba.txt', model_path='weights.h5'):
+                 attribute_file_name='list_attr_celeba.txt', model_path='weights.h5', aux_model_path='weights_aux.h5'):
         self.crop = crop
 
         self.input_height = input_height
@@ -26,6 +27,7 @@ class MCNN(object):
         self.data_dir = data_dir
         self.input_fname_pattern = input_fname_pattern
         self.model_path = model_path
+        self.aux_model_path = aux_model_path
 
         self.data = glob.glob(os.path.join(self.data_dir, self.train_dataset_name, self.input_fname_pattern))
         if self.test_dataset_name is None:
@@ -42,7 +44,9 @@ class MCNN(object):
         self.yt = None
 
         self.model = None
+        self.aux_model = None
         self.build_model()
+        self.build_aux()
 
     def build_model(self):
         if self.crop:
@@ -167,20 +171,35 @@ class MCNN(object):
         # chubby
         fat = Dense(1, activation='sigmoid')(fat)
 
+        outputs = keras.layers.concatenate([
+            gender,
+            nose,
+            mouth,
+            eyes,
+            face,
+            aroundhead,
+            facialhair,
+            cheeks,
+            fat
+        ])
+
         self.model = Model(inputs=inputs,
-                           outputs=[gender,
-                                    nose,
-                                    mouth,
-                                    eyes,
-                                    face,
-                                    aroundhead,
-                                    facialhair,
-                                    cheeks,
-                                    fat])
+                           outputs=outputs)
         self.model.compile(optimizer='adam', loss='binary_crossentropy')
 
-    def train(self, epochs=22, batch_size=100, train_size=np.inf, test_size=np.inf):
-        print(self.model.summary())
+    def build_aux(self):
+        inputs = Input(shape=(35,))
+        outputs = Dense(35, activation='sigmoid')(inputs)
+
+        self.aux_model = Model(inputs=inputs,
+                               outputs=outputs)
+        self.aux_model.compile(optimizer='adam', loss='binary_crossentropy')
+
+    def train(self, epochs=22, batch_size=100, train_size=np.inf, test_size=np.inf, aux=False):
+        if aux:
+            print(self.aux_model.summary())
+        else:
+            print(self.model.summary())
 
         if self.test_data is not None:
             ntest = min(len(self.test_data), test_size)
@@ -197,13 +216,16 @@ class MCNN(object):
                 for g, group in enumerate(attribute_groups):
                     yt[g][i] = group
             self.xt = xt
-            self.yt = yt
+            self.yt = np.concatenate(yt, axis=1)
 
         counter = 1
         start_time = time.time()
         could_load = self.load()
         if could_load:
-            print('Resuming training from loaded model')
+            if could_load == 2:
+                print('Resuming training from loaded model')
+            else:
+                print('Resuming training from loaded base model (no aux)')
         else:
             print('Training new model')
 
@@ -228,35 +250,45 @@ class MCNN(object):
                 for i, attribute_groups in enumerate(batch_y):
                     for g, group in enumerate(attribute_groups):
                         y[g][i] = group
+                y = np.concatenate(y, axis=1)
 
-                train_loss = self.model.train_on_batch(x, y)
-                train_loss_total = sum(train_loss)
+                if aux:
+                    scores = self.model.predict_on_batch(x)
+                    train_loss = self.aux_model.train_on_batch(scores, y)
+                else:
+                    train_loss = self.model.train_on_batch(x, y)
 
                 counter += 1
                 print('Epoch: [{:2d}/{:2d}] [{:4d}/{:4d}], time: {:4.4f}, loss: {:.8f}'.format(
-                    epoch+1, epochs, idx+1, batch_idxs, time.time() - start_time, train_loss_total))
+                    epoch+1, epochs, idx+1, batch_idxs, time.time() - start_time, train_loss))
 
                 if np.mod(counter, 500) == 2:
                     self.save()
 
             if self.xt is not None:
-                accuracy = self.evaluate(self.xt, self.yt, batch_size=batch_size)
+                accuracy = self.evaluate(self.xt, self.yt, batch_size=batch_size, aux=aux)
                 print('Test accuracy: {:.2f}'.format(accuracy*100.0))
 
-    def evaluate(self, xt, yt, batch_size=None):
-        _yt = np.concatenate(yt, axis=1)
-        _ytp = np.concatenate(self.model.predict(xt, batch_size=batch_size), axis=1)
-        _ytp[_ytp>=0.5] = 1
-        _ytp[_ytp<0.5] = 0
-        return np.sum(np.abs(_yt - _ytp)) / _yt.size
+    def evaluate(self, xt, yt, batch_size=None, aux=False):
+        ytp = self.model.predict(xt, batch_size=batch_size)
+        if aux:
+            ytp = self.aux_model.predict(ytp, batch_size=batch_size)
+        ytp[ytp>=0.5] = 1
+        ytp[ytp<0.5] = 0
+        return np.sum(np.abs(yt - ytp)) / yt.size
 
     def save(self):
         self.model.save_weights(self.model_path)
+        self.aux_model.save_weights(self.aux_model_path)
 
     def load(self):
         if os.path.exists(self.model_path):
             self.model.load_weights(self.model_path)
-            return True
+            if os.path.exists(self.aux_model_path):
+                self.aux_model.load_weights(self.aux_model_path)
+                return 2
+            else:
+                return True
         else:
             return False
 
