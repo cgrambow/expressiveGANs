@@ -14,7 +14,8 @@ from util import get_image
 class MCNN(object):
     def __init__(self, input_height=108, input_width=108, crop=True, output_height=64, output_width=64,
                  train_dataset_name='celebA', test_dataset_name=None, data_dir='', input_fname_pattern='*.jpg',
-                 attribute_file_name='list_attr_celeba.txt', model_path='weights.h5', aux_model_path='weights_aux.h5'):
+                 attribute_file_name='list_attr_celeba.txt', model_path='weights.h5', aux_model_path='weights_aux.h5',
+                 train_size=-1, test_size=-1):
         self.crop = crop
 
         self.input_height = input_height
@@ -30,11 +31,17 @@ class MCNN(object):
         self.aux_model_path = aux_model_path
 
         self.data = glob.glob(os.path.join(self.data_dir, self.train_dataset_name, self.input_fname_pattern))
+        random.shuffle(self.data)
+        if train_size > 0:
+            self.data = self.data[:train_size]
+
         if self.test_dataset_name is None:
-            self.test_data = None
+            self.test_data = []
         else:
             self.test_data = glob.glob(os.path.join(self.data_dir, self.test_dataset_name, self.input_fname_pattern))
             random.shuffle(self.test_data)
+            if test_size > 0:
+                self.test_data = self.test_data[:test_size]
         self.c_dim = 3  # Assume 3 channels per image
 
         self.attribute_dict = {}
@@ -189,34 +196,32 @@ class MCNN(object):
 
     def build_aux(self):
         inputs = Input(shape=(35,))
-        outputs = Dense(35, activation='sigmoid')(inputs)
+        outputs = Dense(35, activation='sigmoid', use_bias=False)(inputs)
 
         self.aux_model = Model(inputs=inputs,
                                outputs=outputs)
         self.aux_model.compile(optimizer='adam', loss='binary_crossentropy')
 
-    def train(self, epochs=22, batch_size=100, train_size=np.inf, test_size=np.inf, aux=False):
+    def train(self, epochs=22, batch_size=100, aux=False):
         if aux:
             print(self.aux_model.summary())
         else:
             print(self.model.summary())
 
-        if self.test_data is not None:
-            ntest = min(len(self.test_data), test_size)
-            xt = np.array([get_image(file,
-                                     input_height=self.input_height,
-                                     input_width=self.input_width,
-                                     resize_height=self.output_height,
-                                     resize_width=self.output_width,
-                                     crop=self.crop) for file in self.test_data[:ntest]]).astype(np.float32)
-            yt_names = [os.path.basename(file) for file in self.test_data[:ntest]]
+        if self.test_data:
+            self.xt = np.array([get_image(file,
+                                input_height=self.input_height,
+                                input_width=self.input_width,
+                                resize_height=self.output_height,
+                                resize_width=self.output_width,
+                                crop=self.crop) for file in self.test_data]).astype(np.float32)
+            yt_names = [os.path.basename(file) for file in self.test_data]
             yt_tuples = [self.attribute_dict[name] for name in yt_names]
-            yt = [np.empty((ntest, n)).astype(np.float32) for n in (1, 2, 4, 5, 6, 9, 5, 2, 1)]
+            self.yt = [np.empty((len(self.test_data),n)).astype(np.float32) for n in (1, 2, 4, 5, 6, 9, 5, 2, 1)]
             for i, attribute_groups in enumerate(yt_tuples):
                 for g, group in enumerate(attribute_groups):
-                    yt[g][i] = group
-            self.xt = xt
-            self.yt = np.concatenate(yt, axis=1)
+                    self.yt[g][i] = group
+            self.yt = np.concatenate(self.yt, axis=1)
 
         counter = 1
         start_time = time.time()
@@ -230,10 +235,8 @@ class MCNN(object):
             print('Training new model')
 
         for epoch in range(epochs):
-            batch_idxs = min(len(self.data), train_size) // batch_size
-            data_copy = self.data[:batch_idxs*batch_size]
-            random.shuffle(data_copy)
-            self.data[:batch_idxs*batch_size] = data_copy
+            batch_idxs = len(self.data) // batch_size
+            random.shuffle(self.data)
 
             for idx in range(batch_idxs):
                 batch_files = self.data[idx*batch_size:(idx+1)*batch_size]
@@ -277,7 +280,7 @@ class MCNN(object):
             ytp = self.aux_model.predict(ytp, batch_size=batch_size)
         ytp[ytp>=0.5] = 1
         ytp[ytp<0.5] = 0
-        return np.sum(np.abs(yt - ytp)) / yt.size
+        return 1.0 - np.sum(np.abs(yt - ytp)) / yt.size
 
     def save(self, aux=False):
         self.model.save_weights(self.model_path)
@@ -309,65 +312,72 @@ class MCNN(object):
         8: (chubby)
         """
         with open(path) as f:
+            train_names = set(os.path.basename(d) for d in self.data)
+            test_names = set(os.path.basename(d) for d in self.test_data)
+
             f.readline()
             # Get attributes and their column indices
             a = {label: idx for idx, label in enumerate(f.readline().strip().lower().split())}
+
             for line in f:
                 line_split = line.strip().split()
                 img_name = line_split[0]
-                vals = [1 if v == '1' else 0 for v in line_split[1:]]
-                self.attribute_dict[img_name] = (
-                    np.array(
-                        [vals[a['male']]]
-                    ),
-                    np.array(
-                        [vals[a['big_nose']],
-                         vals[a['pointy_nose']]]
-                    ),
-                    np.array(
-                        [vals[a['big_lips']],
-                         vals[a['smiling']],
-                         vals[a['wearing_lipstick']],
-                         vals[a['mouth_slightly_open']]]
-                    ),
-                    np.array(
-                        [vals[a['arched_eyebrows']],
-                         vals[a['bags_under_eyes']],
-                         vals[a['bushy_eyebrows']],
-                         vals[a['narrow_eyes']],
-                         vals[a['eyeglasses']]]
-                    ),
-                    np.array(
-                        [vals[a['attractive']],
-                         vals[a['blurry']],
-                         vals[a['oval_face']],
-                         vals[a['pale_skin']],
-                         vals[a['young']],
-                         vals[a['heavy_makeup']]]
-                    ),
-                    np.array(
-                        [vals[a['black_hair']],
-                         vals[a['blond_hair']],
-                         vals[a['brown_hair']],
-                         vals[a['gray_hair']],
-                         vals[a['bald']],
-                         vals[a['receding_hairline']],
-                         vals[a['bangs']],
-                         vals[a['straight_hair']],
-                         vals[a['wavy_hair']]]
-                    ),
-                    np.array(
-                        [vals[a['5_o_clock_shadow']],
-                         vals[a['mustache']],
-                         vals[a['no_beard']],
-                         vals[a['sideburns']],
-                         vals[a['goatee']]]
-                    ),
-                    np.array(
-                        [vals[a['high_cheekbones']],
-                         vals[a['rosy_cheeks']]]
-                    ),
-                    np.array(
-                        [vals[a['chubby']]]
+
+                # Only save the data we are training or testing on
+                if img_name in train_names or img_name in test_names:
+                    vals = [1 if v == '1' else 0 for v in line_split[1:]]
+                    self.attribute_dict[img_name] = (
+                        np.array(
+                            [vals[a['male']]]
+                        ),
+                        np.array(
+                            [vals[a['big_nose']],
+                             vals[a['pointy_nose']]]
+                        ),
+                        np.array(
+                            [vals[a['big_lips']],
+                             vals[a['smiling']],
+                             vals[a['wearing_lipstick']],
+                             vals[a['mouth_slightly_open']]]
+                        ),
+                        np.array(
+                            [vals[a['arched_eyebrows']],
+                             vals[a['bags_under_eyes']],
+                             vals[a['bushy_eyebrows']],
+                             vals[a['narrow_eyes']],
+                             vals[a['eyeglasses']]]
+                        ),
+                        np.array(
+                            [vals[a['attractive']],
+                             vals[a['blurry']],
+                             vals[a['oval_face']],
+                             vals[a['pale_skin']],
+                             vals[a['young']],
+                             vals[a['heavy_makeup']]]
+                        ),
+                        np.array(
+                            [vals[a['black_hair']],
+                             vals[a['blond_hair']],
+                             vals[a['brown_hair']],
+                             vals[a['gray_hair']],
+                             vals[a['bald']],
+                             vals[a['receding_hairline']],
+                             vals[a['bangs']],
+                             vals[a['straight_hair']],
+                             vals[a['wavy_hair']]]
+                        ),
+                        np.array(
+                            [vals[a['5_o_clock_shadow']],
+                             vals[a['mustache']],
+                             vals[a['no_beard']],
+                             vals[a['sideburns']],
+                             vals[a['goatee']]]
+                        ),
+                        np.array(
+                            [vals[a['high_cheekbones']],
+                             vals[a['rosy_cheeks']]]
+                        ),
+                        np.array(
+                            [vals[a['chubby']]]
+                        )
                     )
-                )
