@@ -1,0 +1,338 @@
+import glob
+import os
+import random
+import time
+
+from keras.models import Model
+from keras.layers import Input, Conv2D, MaxPooling2D, BatchNormalization, Dense, Flatten, Activation, Dropout
+import numpy as np
+
+from util import get_image
+
+
+class MCNN(object):
+    def __init__(self, input_height=108, input_width=108, crop=True, output_height=64, output_width=64,
+                 train_dataset_name='celebA', test_dataset_name=None, data_dir='', input_fname_pattern='*.jpg',
+                 attribute_file_name='list_attr_celeba.txt', model_path='weights.h5'):
+        self.crop = crop
+
+        self.input_height = input_height
+        self.input_width = input_width
+        self.output_height = output_height
+        self.output_width = output_width
+
+        self.train_dataset_name = train_dataset_name
+        self.test_dataset_name = test_dataset_name
+        self.data_dir = data_dir
+        self.input_fname_pattern = input_fname_pattern
+        self.model_path = model_path
+
+        self.data = glob.glob(os.path.join(self.data_dir, self.train_dataset_name, self.input_fname_pattern))
+        if self.test_dataset_name is None:
+            self.test_data = None
+        else:
+            self.test_data = glob.glob(os.path.join(self.data_dir, self.test_dataset_name, self.input_fname_pattern))
+            random.shuffle(self.test_data)
+        self.c_dim = 3  # Assume 3 channels per image
+
+        self.attribute_dict = {}
+        self.load_attributes(os.path.join(self.data_dir, attribute_file_name))
+
+        self.xt = None
+        self.yt = None
+
+        self.model = None
+        self.build_model()
+
+    def build_model(self):
+        if self.crop:
+            image_dims = (self.output_height, self.output_width, self.c_dim)
+        else:
+            image_dims = (self.input_height, self.input_width, self.c_dim)
+
+        inputs = Input(shape=image_dims)
+
+        # Shared layers
+        x = Conv2D(75, (7, 7))(inputs)
+        x = BatchNormalization()(x)
+        x = Activation('relu')(x)
+        x = MaxPooling2D((3, 3))(x)
+
+        x = Conv2D(200, (5, 5))(x)
+        x = BatchNormalization()(x)
+        x = Activation('relu')(x)
+        x = MaxPooling2D((3, 3))(x)
+
+        # Layers for gender group
+        gender = Conv2D(300, (3, 3), padding='same')(x)
+        gender = BatchNormalization()(gender)
+        gender = Activation('relu')(gender)
+        gender = MaxPooling2D((5, 5))(gender)
+        gender = Flatten()(gender)
+        gender = Dense(512, activation='relu')(gender)
+        gender = Dropout(0.5)(gender)
+        gender = Dense(512, activation='relu')(gender)
+        gender = Dropout(0.5)(gender)
+        # male
+        gender = Dense(1, activation='sigmoid')(gender)
+
+        # Layers for nose group
+        nose = Conv2D(300, (3, 3), padding='same')(x)
+        nose = BatchNormalization()(nose)
+        nose = Activation('relu')(nose)
+        nose = MaxPooling2D((5, 5))(nose)
+        nose = Flatten()(nose)
+        nose = Dense(512, activation='relu')(nose)
+        nose = Dropout(0.5)(nose)
+        nose = Dense(512, activation='relu')(nose)
+        nose = Dropout(0.5)(nose)
+        # big nose, pointy nose
+        nose = Dense(2, activation='sigmoid')(nose)
+
+        # Layers for mouth group
+        mouth = Conv2D(300, (3, 3), padding='same')(x)
+        mouth = BatchNormalization()(mouth)
+        mouth = Activation('relu')(mouth)
+        mouth = MaxPooling2D((5, 5))(mouth)
+        mouth = Flatten()(mouth)
+        mouth = Dense(512, activation='relu')(mouth)
+        mouth = Dropout(0.5)(mouth)
+        mouth = Dense(512, activation='relu')(mouth)
+        mouth = Dropout(0.5)(mouth)
+        # big lips, smiling, lipstick, mouth slightly open
+        mouth = Dense(4, activation='sigmoid')(mouth)
+
+        # Layers for eyes group
+        eyes = Conv2D(300, (3, 3), padding='same')(x)
+        eyes = BatchNormalization()(eyes)
+        eyes = Activation('relu')(eyes)
+        eyes = MaxPooling2D((5, 5))(eyes)
+        eyes = Flatten()(eyes)
+        eyes = Dense(512, activation='relu')(eyes)
+        eyes = Dropout(0.5)(eyes)
+        eyes = Dense(512, activation='relu')(eyes)
+        eyes = Dropout(0.5)(eyes)
+        # arched eyebrows, bags under eyes, bushy eyebrows, narrow eyes, eyeglasses
+        eyes = Dense(5, activation='sigmoid')(eyes)
+
+        # Layers for face group
+        face = Conv2D(300, (3, 3), padding='same')(x)
+        face = BatchNormalization()(face)
+        face = Activation('relu')(face)
+        face = MaxPooling2D((5, 5))(face)
+        face = Flatten()(face)
+        face = Dense(512, activation='relu')(face)
+        face = Dropout(0.5)(face)
+        face = Dense(512, activation='relu')(face)
+        face = Dropout(0.5)(face)
+        # attractive, blurry, oval face, pale skin, young, heavy makeup
+        face = Dense(6, activation='sigmoid')(face)
+
+        # Layers for rest
+        rest = Conv2D(300, (3, 3), padding='same')(x)
+        rest = BatchNormalization()(rest)
+        rest = Activation('relu')(rest)
+        rest = MaxPooling2D((5, 5))(rest)
+        rest = Flatten()(rest)
+
+        # Layers for around head group
+        aroundhead = Dense(512, activation='relu')(rest)
+        aroundhead = Dropout(0.5)(aroundhead)
+        aroundhead = Dense(512, activation='relu')(aroundhead)
+        aroundhead = Dropout(0.5)(aroundhead)
+        # black hair, blond hair, brown hair, gray hair, balding, receding hairline, bangs, straight hair, wavy hair
+        aroundhead = Dense(9, activation='sigmoid')(aroundhead)
+
+        # Layers for facial hair group
+        facialhair = Dense(512, activation='relu')(rest)
+        facialhair = Dropout(0.5)(facialhair)
+        facialhair = Dense(512, activation='relu')(facialhair)
+        facialhair = Dropout(0.5)(facialhair)
+        # 5 o'clock shadow, mustache, no beard, sideburns, goatee
+        facialhair = Dense(5, activation='sigmoid')(facialhair)
+
+        # Layers for cheeks group
+        cheeks = Dense(512, activation='relu')(rest)
+        cheeks = Dropout(0.5)(cheeks)
+        cheeks = Dense(512, activation='relu')(cheeks)
+        cheeks = Dropout(0.5)(cheeks)
+        # high cheekbones, rosy cheeks
+        cheeks = Dense(2, activation='sigmoid')(cheeks)
+
+        # Layers for fat group
+        fat = Dense(512, activation='relu')(rest)
+        fat = Dropout(0.5)(fat)
+        fat = Dense(512, activation='relu')(fat)
+        fat = Dropout(0.5)(fat)
+        # chubby
+        fat = Dense(1, activation='sigmoid')(fat)
+
+        self.model = Model(inputs=inputs,
+                           outputs=[gender,
+                                    nose,
+                                    mouth,
+                                    eyes,
+                                    face,
+                                    aroundhead,
+                                    facialhair,
+                                    cheeks,
+                                    fat])
+        self.model.compile(optimizer='adam', loss='binary_crossentropy')
+
+    def train(self, epochs=22, batch_size=100, train_size=np.inf, test_size=np.inf):
+        print(self.model.summary())
+
+        if self.test_data is not None:
+            ntest = min(len(self.test_data), test_size)
+            xt = np.array([get_image(file,
+                                     input_height=self.input_height,
+                                     input_width=self.input_width,
+                                     resize_height=self.output_height,
+                                     resize_width=self.output_width,
+                                     crop=self.crop) for file in self.test_data[:ntest]]).astype(np.float32)
+            yt_names = [os.path.basename(file) for file in self.test_data[:ntest]]
+            yt_tuples = [self.attribute_dict[name] for name in yt_names]
+            yt = [np.empty((ntest, n)).astype(np.float32) for n in (1, 2, 4, 5, 6, 9, 5, 2, 1)]
+            for i, attribute_groups in enumerate(yt_tuples):
+                for g, group in enumerate(attribute_groups):
+                    yt[g][i] = group
+            self.xt = xt
+            self.yt = yt
+
+        counter = 1
+        start_time = time.time()
+        could_load = self.load()
+        if could_load:
+            print('Resuming training from loaded model')
+        else:
+            print('Training new model')
+
+        for epoch in range(epochs):
+            random.shuffle(self.data)
+            batch_idxs = min(len(self.data), train_size) // batch_size
+
+            for idx in range(batch_idxs):
+                batch_files = self.data[idx*batch_size:(idx+1)*batch_size]
+                batch_x = [get_image(batch_file,
+                                     input_height=self.input_height,
+                                     input_width=self.input_width,
+                                     resize_height=self.output_height,
+                                     resize_width=self.output_width,
+                                     crop=self.crop) for batch_file in batch_files]
+                x = np.array(batch_x).astype(np.float32)
+
+                batch_names = [os.path.basename(batch_file) for batch_file in batch_files]
+                batch_y = [self.attribute_dict[name] for name in batch_names]
+                # This has to match the number of attributes in each group (see load_attributes):
+                y = [np.empty((batch_size,n)).astype(np.float32) for n in (1, 2, 4, 5, 6, 9, 5, 2, 1)]
+                for i, attribute_groups in enumerate(batch_y):
+                    for g, group in enumerate(attribute_groups):
+                        y[g][i] = group
+
+                train_loss = self.model.train_on_batch(x, y)
+                train_loss_total = sum(train_loss)
+
+                counter += 1
+                print('Epoch: [{:2d}/{:2d}] [{:4d}/{:4d}], time: {:4.4f}, loss: {:.8f}'.format(
+                    epoch+1, epochs, idx+1, batch_idxs, time.time() - start_time, train_loss_total))
+
+                if np.mod(counter, 500) == 2:
+                    self.save()
+
+            if self.xt is not None:
+                accuracy = self.evaluate(self.xt, self.yt, batch_size=batch_size)
+                print('Test accuracy: {:.2f}'.format(accuracy*100.0))
+
+    def evaluate(self, xt, yt, batch_size=None):
+        _yt = np.concatenate(yt, axis=1)
+        _ytp = np.concatenate(self.model.predict(xt, batch_size=batch_size), axis=1)
+        _ytp[_ytp>=0.5] = 1
+        _ytp[_ytp<0.5] = 0
+        return np.sum(np.abs(_yt - _ytp)) / _yt.size
+
+    def save(self):
+        self.model.save_weights(self.model_path)
+
+    def load(self):
+        if os.path.exists(self.model_path):
+            self.model.load_weights(self.model_path)
+            return True
+        else:
+            return False
+
+    def load_attributes(self, path):
+        """
+        Groups are:
+        0: (male)
+        1: (big_nose, pointy_nose)
+        2: (big_lips, smiling, wearing_lipstick, mouth_slightly_open)
+        3: (arched_eyebrows, bags_under_eyes, bushy_eyebrows, narrow_eyes, eyeglasses)
+        4: (attractive, blurry, oval_face, pale_skin, young, heavy_makeup)
+        5: (black_hair, blond_hair, brown_hair, gray_hair, bald, receding_hairline, bangs, straight_hair, wavy_hair)
+        6: (5_o_clock_shadow, mustache, no_beard, sideburns, goatee)
+        7: (high_cheekbones, rosy_cheeks)
+        8: (chubby)
+        """
+        with open(path) as f:
+            f.readline()
+            # Get attributes and their column indices
+            a = {label: idx for idx, label in enumerate(f.readline().strip().lower().split())}
+            for line in f:
+                line_split = line.strip().split()
+                img_name = line_split[0]
+                vals = [1 if v == '1' else 0 for v in line_split[1:]]
+                self.attribute_dict[img_name] = (
+                    np.array(
+                        [vals[a['male']]]
+                    ),
+                    np.array(
+                        [vals[a['big_nose']],
+                         vals[a['pointy_nose']]]
+                    ),
+                    np.array(
+                        [vals[a['big_lips']],
+                         vals[a['smiling']],
+                         vals[a['wearing_lipstick']],
+                         vals[a['mouth_slightly_open']]]
+                    ),
+                    np.array(
+                        [vals[a['arched_eyebrows']],
+                         vals[a['bags_under_eyes']],
+                         vals[a['bushy_eyebrows']],
+                         vals[a['narrow_eyes']],
+                         vals[a['eyeglasses']]]
+                    ),
+                    np.array(
+                        [vals[a['attractive']],
+                         vals[a['blurry']],
+                         vals[a['oval_face']],
+                         vals[a['pale_skin']],
+                         vals[a['young']],
+                         vals[a['heavy_makeup']]]
+                    ),
+                    np.array(
+                        [vals[a['black_hair']],
+                         vals[a['blond_hair']],
+                         vals[a['brown_hair']],
+                         vals[a['gray_hair']],
+                         vals[a['bald']],
+                         vals[a['receding_hairline']],
+                         vals[a['bangs']],
+                         vals[a['straight_hair']],
+                         vals[a['wavy_hair']]]
+                    ),
+                    np.array(
+                        [vals[a['5_o_clock_shadow']],
+                         vals[a['mustache']],
+                         vals[a['no_beard']],
+                         vals[a['sideburns']],
+                         vals[a['goatee']]]
+                    ),
+                    np.array(
+                        [vals[a['high_cheekbones']],
+                         vals[a['rosy_cheeks']]]
+                    ),
+                    np.array(
+                        [vals[a['chubby']]]
+                    )
+                )
