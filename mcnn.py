@@ -230,8 +230,10 @@ class MCNN(object):
             print('Training new model')
 
         for epoch in range(epochs):
-            random.shuffle(self.data)
             batch_idxs = min(len(self.data), train_size) // batch_size
+            data_copy = self.data[:batch_idxs*batch_size]
+            random.shuffle(data_copy)
+            self.data[:batch_idxs*batch_size] = data_copy
 
             for idx in range(batch_idxs):
                 batch_files = self.data[idx*batch_size:(idx+1)*batch_size]
@@ -263,7 +265,7 @@ class MCNN(object):
                     epoch+1, epochs, idx+1, batch_idxs, time.time() - start_time, train_loss))
 
                 if np.mod(counter, 500) == 2:
-                    self.save()
+                    self.save(aux=aux)
 
             if self.xt is not None:
                 accuracy = self.evaluate(self.xt, self.yt, batch_size=batch_size, aux=aux)
@@ -277,9 +279,10 @@ class MCNN(object):
         ytp[ytp<0.5] = 0
         return np.sum(np.abs(yt - ytp)) / yt.size
 
-    def save(self):
+    def save(self, aux=False):
         self.model.save_weights(self.model_path)
-        self.aux_model.save_weights(self.aux_model_path)
+        if aux:
+            self.aux_model.save_weights(self.aux_model_path)
 
     def load(self):
         if os.path.exists(self.model_path):
