@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--batch_size', default=100, type=int, help='Batch size')
     parser.add_argument('--aux', action='store_true', help='Train auxiliary net')
     parser.add_argument('--no_base_train', action='store_false', dest='train', help='Do not train base model')
+    parser.add_argument('--load_all_train', action='store_true', help='Load all training data into memory')
     args = parser.parse_args()
 
     mcnn = MCNN(input_height=args.input_height,
@@ -41,7 +42,8 @@ def main():
                 model_path=args.model_path,
                 aux_model_path=args.aux_model_path,
                 train_size=args.train_size,
-                test_size=args.test_size)
+                test_size=args.test_size,
+                load_all_train=args.load_all_train)
     if args.train:
         mcnn.train(epochs=args.epochs,
                    batch_size=args.batch_size)

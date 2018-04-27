@@ -6,6 +6,7 @@ import time
 import keras
 from keras.models import Model
 from keras.layers import Input, Conv2D, MaxPooling2D, BatchNormalization, Dense, Flatten, Activation, Dropout
+from keras.callbacks import ModelCheckpoint
 import numpy as np
 
 from util import get_image
@@ -15,7 +16,7 @@ class MCNN(object):
     def __init__(self, input_height=108, input_width=108, crop=True, output_height=64, output_width=64,
                  train_dataset_name='celebA', test_dataset_name=None, data_dir='', input_fname_pattern='*.jpg',
                  attribute_file_name='list_attr_celeba.txt', model_path='weights.h5', aux_model_path='weights_aux.h5',
-                 train_size=-1, test_size=-1):
+                 train_size=-1, test_size=-1, load_all_train=False):
         self.crop = crop
 
         self.input_height = input_height
@@ -46,6 +47,8 @@ class MCNN(object):
 
         self.attribute_dict = {}
         self.load_attributes(os.path.join(self.data_dir, attribute_file_name))
+
+        self.load_all_train = load_all_train
 
         self.xt = None
         self.yt = None
@@ -234,45 +237,86 @@ class MCNN(object):
         else:
             print('Training new model')
 
-        for epoch in range(epochs):
-            batch_idxs = len(self.data) // batch_size
-            random.shuffle(self.data)
+        if self.load_all_train:
+            x = [get_image(file,
+                           input_height=self.input_height,
+                           input_width=self.input_width,
+                           resize_height=self.output_height,
+                           resize_width=self.output_width,
+                           crop=self.crop) for file in self.data]
+            x = np.array(x).astype(np.float32)
 
-            for idx in range(batch_idxs):
-                batch_files = self.data[idx*batch_size:(idx+1)*batch_size]
-                batch_x = [get_image(batch_file,
-                                     input_height=self.input_height,
-                                     input_width=self.input_width,
-                                     resize_height=self.output_height,
-                                     resize_width=self.output_width,
-                                     crop=self.crop) for batch_file in batch_files]
-                x = np.array(batch_x).astype(np.float32)
+            names = [os.path.basename(file) for file in self.data]
+            attributes = [self.attribute_dict[name] for name in names]
+            # This has to match the number of attributes in each group (see load_attributes):
+            y = [np.empty((batch_size, n)).astype(np.float32) for n in (1, 2, 4, 5, 6, 9, 5, 2, 1)]
+            for i, attribute_groups in enumerate(attributes):
+                for g, group in enumerate(attribute_groups):
+                    y[g][i] = group
+            y = np.concatenate(y, axis=1)
 
-                batch_names = [os.path.basename(batch_file) for batch_file in batch_files]
-                batch_y = [self.attribute_dict[name] for name in batch_names]
-                # This has to match the number of attributes in each group (see load_attributes):
-                y = [np.empty((batch_size,n)).astype(np.float32) for n in (1, 2, 4, 5, 6, 9, 5, 2, 1)]
-                for i, attribute_groups in enumerate(batch_y):
-                    for g, group in enumerate(attribute_groups):
-                        y[g][i] = group
-                y = np.concatenate(y, axis=1)
+            if self.xt is None:
+                test_data = None
+            else:
+                test_data = (self.xt, self.yt)
 
-                if aux:
-                    scores = self.model.predict_on_batch(x)
-                    train_loss = self.aux_model.train_on_batch(scores, y)
-                else:
-                    train_loss = self.model.train_on_batch(x, y)
+            if aux:
+                scores = self.model.predict(x, batch_size=batch_size)
+                self.aux_model.fit(x=scores, y=y,
+                                   batch_size=batch_size,
+                                   epochs=epochs,
+                                   validation_data=test_data,
+                                   verbose=2,
+                                   callbacks=ModelCheckpoint(self.aux_model_path,
+                                                             save_weights_only=True))
+            else:
+                self.model.fit(x=x, y=y,
+                               batch_size=batch_size,
+                               epochs=epochs,
+                               validation_data=test_data,
+                               verbose=2,
+                               callbacks=ModelCheckpoint(self.model_path,
+                                                         save_weights_only=True))
+        else:
+            for epoch in range(epochs):
+                batch_idxs = len(self.data) // batch_size
+                random.shuffle(self.data)
 
-                counter += 1
-                print('Epoch: [{:2d}/{:2d}] [{:4d}/{:4d}], time: {:4.4f}, loss: {:.8f}'.format(
-                    epoch+1, epochs, idx+1, batch_idxs, time.time() - start_time, train_loss))
+                for idx in range(batch_idxs):
+                    batch_files = self.data[idx*batch_size:(idx+1)*batch_size]
+                    batch_x = [get_image(batch_file,
+                                         input_height=self.input_height,
+                                         input_width=self.input_width,
+                                         resize_height=self.output_height,
+                                         resize_width=self.output_width,
+                                         crop=self.crop) for batch_file in batch_files]
+                    x = np.array(batch_x).astype(np.float32)
 
-                if np.mod(counter, 500) == 2:
-                    self.save(aux=aux)
+                    batch_names = [os.path.basename(batch_file) for batch_file in batch_files]
+                    batch_y = [self.attribute_dict[name] for name in batch_names]
+                    # This has to match the number of attributes in each group (see load_attributes):
+                    y = [np.empty((batch_size,n)).astype(np.float32) for n in (1, 2, 4, 5, 6, 9, 5, 2, 1)]
+                    for i, attribute_groups in enumerate(batch_y):
+                        for g, group in enumerate(attribute_groups):
+                            y[g][i] = group
+                    y = np.concatenate(y, axis=1)
 
-            if self.xt is not None:
-                accuracy = self.evaluate(self.xt, self.yt, batch_size=batch_size, aux=aux)
-                print('Test accuracy: {:.2f}'.format(accuracy*100.0))
+                    if aux:
+                        scores = self.model.predict_on_batch(x)
+                        train_loss = self.aux_model.train_on_batch(scores, y)
+                    else:
+                        train_loss = self.model.train_on_batch(x, y)
+
+                    counter += 1
+                    print('Epoch: [{:2d}/{:2d}] [{:4d}/{:4d}], time: {:4.4f}, loss: {:.8f}'.format(
+                        epoch+1, epochs, idx+1, batch_idxs, time.time() - start_time, train_loss))
+
+                    if np.mod(counter, 500) == 2:
+                        self.save(aux=aux)
+
+                if self.xt is not None:
+                    accuracy = self.evaluate(self.xt, self.yt, batch_size=batch_size, aux=aux)
+                    print('Test accuracy: {:.2f}'.format(accuracy*100.0))
 
     def predict(self, xt, batch_size=None, aux=False):
         ytp = self.model.predict(xt, batch_size=batch_size)
