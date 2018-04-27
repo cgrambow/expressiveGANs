@@ -1,6 +1,6 @@
 import argparse
 
-from mcnn import MCNN
+from egan.mcnn import MCNN
 
 
 def main():

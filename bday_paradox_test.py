@@ -4,8 +4,8 @@ import os
 
 import numpy as np
 
-from mcnn import MCNN
-from util import imread, imsave
+from egan.mcnn import MCNN
+from egan.util import imread, imsave
 
 
 def main():

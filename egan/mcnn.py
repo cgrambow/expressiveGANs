@@ -8,7 +8,7 @@ from keras.models import Model
 from keras.layers import Input, Conv2D, MaxPooling2D, BatchNormalization, Dense, Flatten, Activation, Dropout
 import numpy as np
 
-from util import get_image
+from egan.util import get_image
 
 
 class MCNN(object):
