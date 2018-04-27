@@ -13,8 +13,8 @@ from util import get_image
 
 class MCNN(object):
     def __init__(self, input_height=108, input_width=108, crop=True, output_height=64, output_width=64,
-                 train_dataset_name='celebA', test_dataset_name=None, data_dir='', input_fname_pattern='*.jpg',
-                 attribute_file_name='list_attr_celeba.txt', model_path='weights.h5', aux_model_path='weights_aux.h5',
+                 train_dataset_name=None, test_dataset_name=None, data_dir='', input_fname_pattern='*.jpg',
+                 attribute_file_name=None, model_path='weights.h5', aux_model_path='weights_aux.h5',
                  train_size=-1, test_size=-1):
         self.crop = crop
 
@@ -30,10 +30,13 @@ class MCNN(object):
         self.model_path = model_path
         self.aux_model_path = aux_model_path
 
-        self.data = glob.glob(os.path.join(self.data_dir, self.train_dataset_name, self.input_fname_pattern))
-        random.shuffle(self.data)
-        if train_size > 0:
-            self.data = self.data[:train_size]
+        if self.train_dataset_name is None:
+            self.data = []
+        else:
+            self.data = glob.glob(os.path.join(self.data_dir, self.train_dataset_name, self.input_fname_pattern))
+            random.shuffle(self.data)
+            if train_size > 0:
+                self.data = self.data[:train_size]
 
         if self.test_dataset_name is None:
             self.test_data = []
@@ -45,7 +48,8 @@ class MCNN(object):
         self.c_dim = 3  # Assume 3 channels per image
 
         self.attribute_dict = {}
-        self.load_attributes(os.path.join(self.data_dir, attribute_file_name))
+        if attribute_file_name is not None:
+            self.load_attributes(os.path.join(self.data_dir, attribute_file_name))
 
         self.xt = None
         self.yt = None
@@ -203,6 +207,9 @@ class MCNN(object):
         self.aux_model.compile(optimizer='adam', loss='binary_crossentropy')
 
     def train(self, epochs=22, batch_size=100, aux=False):
+        if not self.data or not self.attribute_dict:
+            raise Exception('Need data to train')
+
         if aux:
             print(self.aux_model.summary())
         else:
