@@ -80,8 +80,8 @@ def main():
             if could_load:
                 imgs0 = imgs[inds_most_sim[:,0]]
                 imgs1 = imgs[inds_most_sim[:,1]]
-                attributes0 = mcnn.predict(imgs0, aux=aux)
-                attributes1 = mcnn.predict(imgs1, aux=aux)
+                attributes0 = mcnn.predict(imgs0, batch_size=nsim, aux=aux)
+                attributes1 = mcnn.predict(imgs1, batch_size=nsim, aux=aux)
                 for idx, (a0, a1) in enumerate(zip(attributes0, attributes1)):
                     # Only retain the attributes we're interested in comparing
                     if np.array_equal(a0[attribute_inds], a1[attribute_inds]):
