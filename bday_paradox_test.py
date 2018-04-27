@@ -3,6 +3,7 @@ import glob
 import os
 
 import numpy as np
+import scipy.spatial.distance
 
 from egan.mcnn import MCNN
 from egan.util import imread, imsave
@@ -59,10 +60,9 @@ def main():
             imgs = all_imgs[sidx*s:(sidx+1)*s]
 
             # Find Euclidian distances between pairs of images
-            dists = np.zeros((len(imgs), len(imgs)))
-            for i in range(len(imgs)):
-                for j in range(i+1, len(imgs)):
-                    dists[i,j] = np.linalg.norm(imgs[i]-imgs[j]) / img_size
+            imgs_flat = imgs.reshape((len(imgs), img_size))
+            dists = scipy.spatial.distance.pdist(imgs_flat) / float(img_size)
+            dists = scipy.spatial.distance.squareform(dists)
 
             # Find nsim smallest distances
             inds = np.triu_indices_from(dists, k=1)
