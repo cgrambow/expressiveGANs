@@ -33,6 +33,10 @@ def main():
             aux = False
             print('Loaded base model (no aux)\n')
 
+    # Don't consider attributes 'smiling', 'wearing_lipstick', 'mouth_slightly_open', 'blurry', 'heavy_makeup'
+    # because a human would also ignore them
+    attribute_inds = np.array([0,1,2,3,7,8,9,10,11,12,14,15,16,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34])
+
     impaths = glob.glob(os.path.join(imdir, '*'))[:nsamples]
     imlist = [imread(path)/127.5 - 1.0 for path in impaths]  # Scale between -1 and 1
     assert all(len(imlist) >= s for s in sample_sizes)
@@ -79,7 +83,8 @@ def main():
                 attributes0 = mcnn.predict(imgs0, aux=aux)
                 attributes1 = mcnn.predict(imgs1, aux=aux)
                 for idx, (a0, a1) in enumerate(zip(attributes0, attributes1)):
-                    if np.array_equal(a0, a1):
+                    # Only retain the attributes we're interested in comparing
+                    if np.array_equal(a0[attribute_inds], a1[attribute_inds]):
                         duplicate_flags.append(1)
                         dup_path = os.path.join(out_dir, 'ssize{}_sample{}_duplicate.png'.format(s, sidx))
                         imsave(np.array((imgs0[idx], imgs1[idx])), (1, 2), dup_path)
