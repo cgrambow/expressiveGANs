@@ -35,8 +35,9 @@ def main():
             print('Loaded base model (no aux)\n')
 
     # Don't consider attributes 'smiling', 'wearing_lipstick', 'mouth_slightly_open', 'blurry', 'heavy_makeup'
-    # because a human would also ignore them
-    attribute_inds = np.array([0,1,2,3,7,8,9,10,11,12,14,15,16,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34])
+    # because a human would also ignore them. Also don't consider 'big_lips', 'oval_face', and 'pointy_nose'
+    # because MCNN has trouble with them.
+    attribute_inds = np.array([0,1,7,8,9,10,11,12,15,16,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34])
 
     impaths = glob.glob(os.path.join(imdir, '*'))[:nsamples]
     imlist = [imread(path)/127.5 - 1.0 for path in impaths]  # Scale between -1 and 1
