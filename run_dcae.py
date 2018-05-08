@@ -20,6 +20,7 @@ flags.DEFINE_integer("input_width", None,
 flags.DEFINE_integer("output_height", 64, "The size of the output images to produce [64]")
 flags.DEFINE_integer("output_width", None,
                      "The size of the output images to produce. If None, same value as output_height [None]")
+flags.DEFINE_integer("z_dim", 100, "Latent space dimension of the autoencoder [100]")
 flags.DEFINE_string("dataset", "celebA", "The name of the dataset [celebA]")
 flags.DEFINE_string("input_fname_pattern", "*.jpg", "Glob pattern of input images file names [*.jpg]")
 flags.DEFINE_string("checkpoint_dir", "dcae_checkpoint", "Checkpoint directory name [dcae_checkpoint]")
@@ -59,6 +60,7 @@ def main(_):
             input_fname_pattern=FLAGS.input_fname_pattern,
             checkpoint_dir=FLAGS.checkpoint_dir,
             num=FLAGS.num,
+            z_dim=FLAGS.z_dim,
             batch_size=FLAGS.batch_size,
             test_num=FLAGS.batch_size,
         )
