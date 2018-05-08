@@ -143,7 +143,7 @@ class DCAE(object):
                 if np.mod(counter, 100) == 1:
                     tests, loss = self.sess.run([self.tester, self.loss], feed_dict={self.x: test_x})
                     save_images(tests, image_manifold_size(tests.shape[0]),
-                                os.path.join(config.test_dir, 'train_{:02d}_{:04d}.png'.format(epoch, idx)))
+                                os.path.join(config.test_dir, 'train_{:02d}_{:04d}.png'.format(epoch+1, idx+1)))
                     print('[Test] loss: {:.8f}'.format(loss))
 
                 if np.mod(counter, 500) == 2:
