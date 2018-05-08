@@ -149,6 +149,8 @@ class DCAE(object):
                 if np.mod(counter, 500) == 2:
                     self.save(self.checkpoint_dir, counter)
 
+        self.save(self.checkpoint_dir, counter)
+
     def test(self, config):
         batch_idxs = len(self.data) // self.batch_size
 
